@@ -1,0 +1,14 @@
+# KOL channels list — one handle per line
+# Lines starting with # are ignored
+
+# Telegram channels
+@cryptoinsider
+@defi_daily
+@web3marketing
+@altcoinalerts
+@nftcollectors
+
+# YouTube channels
+@CryptoTips
+@TheBlockchainBoy
+@DeFiMasterclass
