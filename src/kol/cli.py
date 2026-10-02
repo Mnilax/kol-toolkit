@@ -28,12 +28,15 @@ def scrape(
     """Scrape channels from a text file."""
     import asyncio
 
+    if limit <= 0:
+        raise typer.BadParameter("must be positive", param_hint="--limit")
+
     path = Path(channels_file)
     if not path.exists():
         console.print(f"[red]File not found: {channels_file}[/red]")
         raise typer.Exit(1)
 
-    handles = [line.strip() for line in path.read_text().splitlines() if line.strip() and not line.startswith("#")]
+    handles = [line.strip() for line in path.read_text(encoding="utf-8-sig").splitlines() if line.strip() and not line.lstrip().startswith("#")]
     console.print(f"Found {len(handles)} channels in {channels_file}")
 
     resume_file = f".checkpoint_{platform}.json" if resume else None
@@ -51,7 +54,7 @@ def scrape(
     # Save results
     from dataclasses import asdict
     data = [asdict(r) for r in results]
-    Path(output).write_text(json.dumps(data, ensure_ascii=False, indent=2))
+    Path(output).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print(f"[green]✓ Scraped {len(results)} channels -> {output}[/green]")
 
     errors = [r for r in results if hasattr(r, "error") and r.error]
@@ -69,12 +72,12 @@ def enrich(
     from kol.fraud import detect_fraud
     from kol.metrics import cpm, engagement_rate_check, parse_price
 
-    data = json.loads(Path(data_file).read_text())
+    data = json.loads(Path(data_file).read_text(encoding="utf-8-sig"))
 
     # Load prices if provided
     prices: dict[str, str] = {}
     if prices_file and Path(prices_file).exists():
-        for line in Path(prices_file).read_text().splitlines():
+        for line in Path(prices_file).read_text(encoding="utf-8-sig").splitlines():
             if "\t" in line:
                 handle, price = line.split("\t", 1)
                 prices[handle.strip().lower().lstrip("@")] = price.strip()
@@ -84,7 +87,9 @@ def enrich(
         handle_key = ch.get("handle", "").lower().lstrip("@")
         price_raw = prices.get(handle_key, ch.get("price_raw"))
         price = parse_price(price_raw)
-        reach = ch.get("reach") or ch.get("total_views_last_n") or 0
+        reach = ch.get("reach")
+        if reach is None:
+            reach = ch.get("total_views_last_n", 0)
         subs = ch.get("subscribers", 0)
         er_pct = ch.get("er_pct")
 
@@ -102,7 +107,7 @@ def enrich(
         ch["fraud_flags"] = [f.message for f in fraud_flags]
         enriched.append(ch)
 
-    Path(output).write_text(json.dumps(enriched, ensure_ascii=False, indent=2))
+    Path(output).write_text(json.dumps(enriched, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print(f"[green]✓ Enriched {len(enriched)} channels -> {output}[/green]")
 
 
@@ -114,7 +119,7 @@ def dedup(
     """Deduplicate channels (case-insensitive, keep min non-zero price)."""
     from kol.dedup import ChannelEntry, dedup_channels
 
-    data = json.loads(Path(data_file).read_text())
+    data = json.loads(Path(data_file).read_text(encoding="utf-8-sig"))
 
     entries = [
         ChannelEntry(
@@ -129,7 +134,7 @@ def dedup(
     result = [e.data for e in deduped]
 
     removed = len(data) - len(result)
-    Path(output).write_text(json.dumps(result, ensure_ascii=False, indent=2))
+    Path(output).write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
     console.print(f"[green]✓ Deduped: {len(data)} -> {len(result)} ({removed} duplicates removed)[/green]")
 
 
@@ -143,9 +148,9 @@ def report(
     min_er: Optional[float] = typer.Option(None, "--min-er", help="Filter: min ER%"),
 ) -> None:
     """Display a rich table and optionally export to CSV/XLSX."""
-    from kol.report import ChannelRow, export_csv, export_xlsx, render_table
+    from kol.report import ChannelRow, export_csv, export_xlsx, render_table, select_rows
 
-    data = json.loads(Path(data_file).read_text())
+    data = json.loads(Path(data_file).read_text(encoding="utf-8-sig"))
 
     rows = []
     for ch in data:
@@ -154,17 +159,21 @@ def report(
             platform=ch.get("platform", "tg"),
             title=ch.get("title", ""),
             subscribers=ch.get("subscribers", 0),
-            reach=ch.get("reach") or ch.get("total_views_last_n", 0),
+            reach=ch.get("reach", ch.get("total_views_last_n", 0)),
             avg_views=ch.get("avg_views", 0),
             er_pct=ch.get("er_pct"),
             er_tier=ch.get("er_tier"),
             price=ch.get("price"),
             cpm=ch.get("cpm"),
-            frequency=ch.get("frequency"),
+            frequency=ch.get("frequency", ch.get("frequency_per_week")),
             fraud_flags=ch.get("fraud_flags", []),
         ))
 
-    render_table(rows, sort_by=sort, max_cpm=max_cpm, min_er=min_er)
+    try:
+        rows = select_rows(rows, sort_by=sort, max_cpm=max_cpm, min_er=min_er)
+    except ValueError as exc:
+        raise typer.BadParameter(str(exc), param_hint="--sort") from exc
+    render_table(rows)
 
     if csv_out:
         export_csv(rows, csv_out)

@@ -6,6 +6,7 @@ All functions are stateless and I/O-free — easy to test.
 from __future__ import annotations
 
 import re
+import math
 
 
 def parse_price(raw: str | int | float | None) -> float | None:
@@ -19,7 +20,7 @@ def parse_price(raw: str | int | float | None) -> float | None:
     if raw is None:
         return None
     if isinstance(raw, (int, float)):
-        return float(raw) if raw > 0 else None
+        return float(raw) if not isinstance(raw, bool) and math.isfinite(raw) and raw > 0 else None
 
     s = str(raw).strip()
     if not s:
@@ -40,11 +41,12 @@ def parse_price(raw: str | int | float | None) -> float | None:
     # Handle "1.5k" notation
     match = re.match(r"^(\d+(?:\.\d+)?)\s*[kK\u043a\u041a]$", s)
     if match:
-        return float(match.group(1)) * 1000
+        val = float(match.group(1)) * 1000
+        return val if math.isfinite(val) and val > 0 else None
 
     try:
         val = float(s)
-        return val if val > 0 else None
+        return val if math.isfinite(val) and val > 0 else None
     except ValueError:
         return None
 
@@ -55,7 +57,7 @@ def cpm(price: float | None, reach: int | None) -> float | None:
     Formula: 1000 * price / reach
     Returns None if inputs are invalid.
     """
-    if price is None or reach is None or reach <= 0 or price <= 0:
+    if price is None or reach is None or not math.isfinite(price) or not math.isfinite(reach) or reach <= 0 or price <= 0:
         return None
     return 1000.0 * price / reach
 
@@ -66,7 +68,7 @@ def engagement_rate_check(er_pct: float | None) -> str | None:
     ER% is taken as-is from TGStat/analytics — NOT computed.
     Returns a tier label for context.
     """
-    if er_pct is None:
+    if er_pct is None or not math.isfinite(er_pct) or er_pct < 0:
         return None
     if er_pct >= 10:
         return "very-high"
@@ -81,7 +83,7 @@ def engagement_rate_check(er_pct: float | None) -> str | None:
 
 def views_per_post(total_views: int | None, post_count: int | None) -> float | None:
     """Average views per post."""
-    if total_views is None or post_count is None or post_count <= 0:
+    if total_views is None or post_count is None or not math.isfinite(total_views) or total_views < 0 or post_count <= 0:
         return None
     return total_views / post_count
 

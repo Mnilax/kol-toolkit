@@ -18,9 +18,8 @@ yt-lockup-view-model with blind-text fallback.
 from __future__ import annotations
 
 import json
-import os
 import re
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 CHECKPOINT_INTERVAL = 5
@@ -33,12 +32,13 @@ class YouTubeChannel:
     handle: str
     title: str = ""
     subscribers: int = 0
-    avg_views: float = 0.0
-    er_pct: float = 0.0
-    frequency_per_week: float = 0.0
-    avg_duration_sec: int = 0
+    avg_views: float | None = None
+    er_pct: float | None = None
+    frequency_per_week: float | None = None
+    avg_duration_sec: int | None = None
     video_count: int = 0
     error: str | None = None
+    platform: str = "yt"
 
 
 async def scrape_channels(
@@ -58,7 +58,6 @@ async def scrape_channels(
     """
     try:
         import httpx
-        from bs4 import BeautifulSoup
     except ImportError:
         raise ImportError(
             "httpx and beautifulsoup4 required. Install with: pip install 'kol-toolkit[youtube]'"
@@ -67,10 +66,12 @@ async def scrape_channels(
     completed: set[str] = set()
     results: list[YouTubeChannel] = []
     if resume_file and Path(resume_file).exists():
-        with open(resume_file) as f:
+        with open(resume_file, encoding="utf-8-sig") as f:
             checkpoint = json.load(f)
             results = [YouTubeChannel(**ch) for ch in checkpoint.get("channels", [])]
-            completed = {ch.handle.lower() for ch in results}
+            completed = {ch.handle.lower() for ch in results if not ch.error}
+            requested = {h.lower() for h in handles}
+            results = [ch for ch in results if not ch.error or ch.handle.lower() not in requested]
 
     async with httpx.AsyncClient(
         timeout=30.0,
@@ -84,10 +85,6 @@ async def scrape_channels(
             try:
                 channel_data = await _fetch_youtube_channel(client, handle, video_count)
                 results.append(channel_data)
-
-                # Early stop on 0 views
-                if channel_data.avg_views == 0 and not channel_data.error:
-                    pass  # Continue, some channels are just new
 
             except Exception as e:
                 results.append(YouTubeChannel(handle=handle, error=str(e)))
@@ -117,7 +114,7 @@ async def _fetch_youtube_channel(client, handle: str, video_count: int) -> YouTu
 
     # Extract initial data JSON from page
     # YouTube embeds data in ytInitialData variable
-    match = re.search(r"var ytInitialData = ({.*?});</script>", html)
+    match = re.search(r"var ytInitialData\s*=\s*({.*?});\s*</script>", html, re.DOTALL)
     if not match:
         return YouTubeChannel(handle=handle, error="Could not parse YouTube page")
 
@@ -162,7 +159,10 @@ def _parse_count(text: str) -> int:
     match = re.match(r"([\d.]+)\s*([KMB])?", text)
     if not match:
         return 0
-    num = float(match.group(1))
+    try:
+        num = float(match.group(1))
+    except ValueError:
+        return 0
     suffix = match.group(2)
     if suffix == "K":
         num *= 1_000
@@ -176,5 +176,5 @@ def _parse_count(text: str) -> int:
 def _save_checkpoint(path: str, results: list[YouTubeChannel]):
     """Save progress to checkpoint file."""
     data = {"channels": [asdict(ch) for ch in results]}
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)

@@ -11,7 +11,7 @@ Built for crypto/Web3 KOL marketing — evaluate influencers before spending bud
 
 ## Features
 
-- **Scrape** Telegram and YouTube channels with watchdog timeouts and resume support
+- **Scrape** Telegram post views, or YouTube channel title/subscriber metadata, with resume support
 - **Enrich** with CPM (cost per mille), ER% tier classification, fraud flags
 - **Dedup** channels case-insensitively with minimum non-zero price rule
 - **Report** with rich terminal tables, filterable and sortable
@@ -53,6 +53,8 @@ kol scrape channels.txt --platform telegram --resume
 # YouTube
 kol scrape channels.txt --platform youtube -o yt_scraped.json
 ```
+
+The YouTube parser currently reads legacy channel-header metadata only. Average views, ER, duration and posting frequency are unavailable (`null`), and current page layouts may fail to parse. It does not collect video analytics yet.
 
 ### 2. Enrich with metrics
 
@@ -100,6 +102,8 @@ kol report enriched.json --csv report.csv --xlsx report.xlsx
 
 ### Price parsing
 Handles many formats: `450$`, `$450`, `450 USD`, `€50`, `1.5k$`, `[80$](url)`, `1,200$`
+
+Currency symbols are stripped, but amounts are not converted. Normalize prices to one currency before comparing CPM or exporting reports with dollar labels.
 
 ### Deduplication
 Telegram usernames are case-insensitive. `@CryptoAlpha` == `@cryptoalpha`. When duplicates are found, the entry with the minimum non-zero price is kept.

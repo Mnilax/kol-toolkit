@@ -6,6 +6,7 @@ Flags suspicious patterns in channel metrics.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 
 @dataclass
@@ -29,9 +30,14 @@ def detect_fraud(
     All inputs are optional — only available signals are checked.
     """
     flags: list[FraudFlag] = []
+    subscribers = subscribers if subscribers is not None and isfinite(subscribers) and subscribers > 0 else None
+    reach = reach if reach is not None and isfinite(reach) and reach >= 0 else None
+    er_pct = er_pct if er_pct is not None and isfinite(er_pct) and er_pct >= 0 else None
+    views_avg = views_avg if views_avg is not None and isfinite(views_avg) and views_avg >= 0 else None
+    subscriber_growth_30d_pct = subscriber_growth_30d_pct if subscriber_growth_30d_pct is not None and isfinite(subscriber_growth_30d_pct) else None
 
     # --- Reach/Subscribers ratio ---
-    if subscribers and reach and subscribers > 0:
+    if subscribers is not None and reach is not None:
         ratio = reach / subscribers
         if ratio < 0.05:
             flags.append(FraudFlag(

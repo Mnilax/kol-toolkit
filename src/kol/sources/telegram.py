@@ -15,8 +15,7 @@ import asyncio
 import json
 import os
 import re
-import time
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 CHECKPOINT_INTERVAL = 5  # Save checkpoint every N channels
@@ -36,6 +35,7 @@ class TelegramChannel:
     avg_views: float = 0.0
     er_pct: float | None = None  # From TGStat, not computed
     error: str | None = None
+    platform: str = "tg"
 
 
 def normalize_handle(raw: str) -> str:
@@ -89,10 +89,12 @@ async def scrape_channels(
     completed: set[str] = set()
     results: list[TelegramChannel] = []
     if resume_file and Path(resume_file).exists():
-        with open(resume_file) as f:
+        with open(resume_file, encoding="utf-8-sig") as f:
             checkpoint = json.load(f)
             results = [TelegramChannel(**ch) for ch in checkpoint.get("channels", [])]
-            completed = {ch.handle.lower() for ch in results}
+            completed = {ch.handle.lower() for ch in results if not ch.error}
+            requested = {normalize_handle(h).lower() for h in handles}
+            results = [ch for ch in results if not ch.error or ch.handle.lower() not in requested]
 
     consecutive_timeouts = 0
 
@@ -138,11 +140,13 @@ async def scrape_channels(
 
 async def _fetch_channel(client, handle, posts_limit, ResolveUsernameRequest, GetHistoryRequest):
     """Fetch a single channel's data."""
+    from telethon.tl.functions.channels import GetFullChannelRequest
     username = handle.lstrip("@")
 
     # Use ResolveUsernameRequest (more reliable than get_entity)
     resolved = await client(ResolveUsernameRequest(username))
     channel = resolved.peer
+    full = await client(GetFullChannelRequest(channel))
 
     history = await client(GetHistoryRequest(
         peer=channel, limit=posts_limit, offset_date=None,
@@ -150,14 +154,14 @@ async def _fetch_channel(client, handle, posts_limit, ResolveUsernameRequest, Ge
     ))
 
     messages = history.messages
-    views_list = [m.views for m in messages if m.views is not None]
+    views_list = [m.views for m in messages if getattr(m, "views", None) is not None]
     total_views = sum(views_list)
     avg = total_views / len(views_list) if views_list else 0
 
     return TelegramChannel(
         handle=handle,
         title=getattr(resolved, "chats", [{}])[0].title if hasattr(resolved, "chats") and resolved.chats else username,
-        subscribers=getattr(resolved.chats[0], "participants_count", 0) if hasattr(resolved, "chats") and resolved.chats else 0,
+        subscribers=getattr(full.full_chat, "participants_count", 0) or 0,
         total_views_last_n=total_views,
         post_count=len(messages),
         avg_views=avg,
@@ -167,5 +171,5 @@ async def _fetch_channel(client, handle, posts_limit, ResolveUsernameRequest, Ge
 def _save_checkpoint(path: str, results: list[TelegramChannel]):
     """Save progress to checkpoint file."""
     data = {"channels": [asdict(ch) for ch in results]}
-    with open(path, "w") as f:
+    with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
